@@ -43,13 +43,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Login NGC (only if NGC_API_KEY is set)
-        if: ${{ secrets.NGC_API_KEY != '' }}
-        uses: docker/login-action@v3
-        with:
-          registry: nvcr.io
-          username: '$oauthtoken'
-          password: ${{ secrets.NGC_API_KEY }}
+      - name: Login NGC (optional, skipped when no key)
+        env:
+          NGC_API_KEY: ${{ secrets.NGC_API_KEY }}
+        run: |
+          if [ -n "$NGC_API_KEY" ]; then
+            echo "$NGC_API_KEY" | docker login nvcr.io -u '$oauthtoken' --password-stdin
+          else
+            echo "no NGC_API_KEY -> will fall back to the public CUDA base image"
+          fi
 
       - name: Resolve base
         id: base
@@ -86,7 +88,7 @@ jobs:
       - name: Verify image boots as arm64
         run: |
           docker run --rm --platform linux/arm64 "${{ steps.ref.outputs.name }}:${{ github.sha }}" \
-            sh -c 'uname -m && python3 -c "import torch,sys;print(\"torch\",torch.__version__,\"archs\",torch.cuda.get_arch_list()[:6])"'
+            sh -c 'uname -m && python3 -c "import torch; print(\"torch\", torch.__version__, \"archs\", torch.cuda.get_arch_list())"'
 
       - name: Summary
         run: |
