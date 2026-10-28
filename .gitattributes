@@ -1,0 +1,6 @@
+# Keep shell/Docker/CI files LF even on Windows checkouts, otherwise the arm64
+# image fails with "$'\r': command not found".
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.png binary
+*.jpg binary

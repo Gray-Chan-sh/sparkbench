@@ -1,0 +1,99 @@
+name: image
+
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Base image (must be multi-arch or linux/arm64)"
+        required: false
+        default: ""
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af
+          df -h /
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login NGC (only if NGC_API_KEY is set)
+        if: ${{ secrets.NGC_API_KEY != '' }}
+        uses: docker/login-action@v3
+        with:
+          registry: nvcr.io
+          username: '$oauthtoken'
+          password: ${{ secrets.NGC_API_KEY }}
+
+      - name: Resolve base
+        id: base
+        env:
+          NGC: ${{ secrets.NGC_API_KEY }}
+          INPUT_BASE: ${{ inputs.base }}
+        run: |
+          if [ -n "$INPUT_BASE" ]; then
+            echo "image=$INPUT_BASE" >> "$GITHUB_OUTPUT"
+          elif [ -n "$NGC" ]; then
+            echo "image=nvcr.io/nvidia/pytorch:25.09-py3" >> "$GITHUB_OUTPUT"
+          else
+            echo "image=nvidia/cuda:13.0.0-devel-ubuntu24.04" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Lowercase image ref
+        id: ref
+        run: echo "name=${IMAGE,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push arm64
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          build-args: |
+            BASE=${{ steps.base.outputs.image }}
+          tags: |
+            ${{ steps.ref.outputs.name }}:latest
+            ${{ steps.ref.outputs.name }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify image boots as arm64
+        run: |
+          docker run --rm --platform linux/arm64 "${{ steps.ref.outputs.name }}:${{ github.sha }}" \
+            sh -c 'uname -m && python3 -c "import torch,sys;print(\"torch\",torch.__version__,\"archs\",torch.cuda.get_arch_list()[:6])"'
+
+      - name: Summary
+        run: |
+          {
+            echo "### sparkbench arm64 image"
+            echo ""
+            echo "- base: \`${{ steps.base.outputs.image }}\`"
+            echo "- image: \`${{ steps.ref.outputs.name }}:latest\`"
+            echo "- pull on the box: \`docker pull ${{ steps.ref.outputs.name }}:latest\`"
+          } >> "$GITHUB_STEP_SUMMARY"

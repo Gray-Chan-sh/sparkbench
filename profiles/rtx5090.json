@@ -1,0 +1,35 @@
+{
+  "name": "rtx5090",
+  "note": "Dry-run profile: same Blackwell/CUDA13 toolchain (sm_120) for validating the harness before spending GB10 hours",
+  "expect": {
+    "cc": "12.0",
+    "vram_gib": 32,
+    "bf16_tflops": 104,
+    "fp16_tflops": 104,
+    "fp8_tflops": 208,
+    "bandwidth_gbs": 1792,
+    "good_ratio": 0.6
+  },
+  "compute": {
+    "sizes": [4096, 8192],
+    "dtypes": ["bf16", "fp16"],
+    "fp8_size": 4096
+  },
+  "bandwidth": {
+    "buffer_gib": 8
+  },
+  "capacity": {
+    "step_gib": 2,
+    "max_gib": 30,
+    "cliff_factor": 3.0
+  },
+  "video": {
+    "frames": [16, 64],
+    "video": null,
+    "model": null
+  },
+  "sustained": {
+    "seconds": 600,
+    "matmul_size": 8192
+  }
+}

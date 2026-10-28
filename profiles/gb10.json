@@ -1,0 +1,57 @@
+{
+  "name": "gb10",
+  "note": "NVIDIA DGX Spark / GB10, 128GB unified LPDDR5x, 273 GB/s, sm_121",
+  "expect": {
+    "cc": "12.1",
+    "vram_gib": 128,
+    "bf16_tflops": 125,
+    "fp16_tflops": 125,
+    "fp8_tflops": 250,
+    "bandwidth_gbs": 273,
+    "good_ratio": 0.6
+  },
+  "compute": {
+    "sizes": [4096, 8192, 16384],
+    "dtypes": ["bf16", "fp16"],
+    "fp8_size": 4096
+  },
+  "bandwidth": {
+    "buffer_gib": 8
+  },
+  "capacity": {
+    "step_gib": 2,
+    "max_gib": 116,
+    "cliff_factor": 3.0
+  },
+  "video": {
+    "video": null,
+    "decode_frames": 300,
+    "frame_size": 448,
+    "max_new_tokens": 128,
+    "question": "Describe what happens in this video, in order.",
+    "models": [
+      {
+        "label": "8b-dense",
+        "id": "Qwen/Qwen3-VL-8B-Instruct",
+        "dtype": "bfloat16",
+        "frames": [16, 64, 128, 256]
+      },
+      {
+        "label": "30b-a3b",
+        "id": "Qwen/Qwen3-VL-30B-A3B-Instruct",
+        "dtype": "bfloat16",
+        "frames": [16, 64, 128, 256]
+      },
+      {
+        "label": "32b-dense",
+        "id": "Qwen/Qwen3-VL-32B-Instruct",
+        "dtype": "bfloat16",
+        "frames": [16, 64, 128]
+      }
+    ]
+  },
+  "sustained": {
+    "seconds": 1800,
+    "matmul_size": 8192
+  }
+}
