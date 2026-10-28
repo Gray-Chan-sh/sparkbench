@@ -5,7 +5,7 @@ set -uo pipefail
 
 REPO_URL="${SPARKBENCH_REPO:-}"          # e.g. https://github.com/you/sparkbench.git
 PROFILE="${SPARKBENCH_PROFILE:-gb10}"
-WORK="/workspace/sparkbench"
+WORK="${SPARKBENCH_WORK:-/workspace/sparkbench}"
 
 echo "[onstart] $(date -u) arch=$(uname -m)"
 
@@ -15,8 +15,11 @@ if [ -n "${REPO_URL}" ]; then
     git clone --depth 1 "${REPO_URL}" "${WORK}" && break
     echo "[onstart] clone failed, retry ${i}"; sleep 5
   done
-else
-  echo "[onstart] SPARKBENCH_REPO not set; assuming /workspace/sparkbench already exists"
+fi
+
+# Prebuilt image already carries the code at /opt/sparkbench.
+if [ ! -d "${WORK}" ] && [ -d /opt/sparkbench ]; then
+  WORK=/opt/sparkbench
 fi
 
 cd "${WORK}" || { echo "[onstart] no code at ${WORK}"; sleep infinity; }
