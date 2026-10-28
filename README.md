@@ -61,15 +61,24 @@ python tools/vast.py offers --gpu GB10 --max-price 1.5
 python tools/vast.py watch  --gpu GB10 --interval 60     # 有货就通知
 ```
 
-挑的时候看三件事：**`cpu_arch` 必须是 aarch64**、`inet_down` ≥ 300 Mbps（拉三个模型）、`reliability2` ≥ 0.95。
+挑的时候看三件事：**`cpu_arch` 必须是 aarch64**、`inet_down` ≥ 300 Mbps（拉三个模型）、`reliability2` ≥ 0.95，外加 **`disk` 给 300 GB**（三个 Qwen3-VL 的 bf16 权重约 141 GiB）。
 
-下单：
+### 网页手动开机时的模板选择
+
+选 **`NVIDIA CUDA`**（vastai/base-image，带 `ARM` 标签）。理由：
+
+- vast 的 ssh / 端口转发 / onstart 机制长在 `vastai/base-image` 里。用别的镜像（包括本项目自己的 `ghcr.io/.../sparkbench`）SSH 可能起不来。
+- 模板里写的是 CUDA 12.4，**不影响**：`bootstrap.sh` 装的是 cu130 的 torch，运行时库随 wheel 自带，只看宿主驱动版本（这台是 13.0，够）。
+- 带 `ARM` 标签是硬条件。列表里 `All-in-One App Studio`、`Unsloth`、`vLLM Omni` 没有 ARM 标签，是 x86 镜像，在 GB10 上会 `exec format error`。
+
+**别选 `PyTorch (Vast)`**：它预装的是 cu124 的 torch，能看见 GPU、但二进制里没有 `sm_121`，每个 kernel 都要从 PTX 现编译——matmul 照样跑通，数字全是假的。`bootstrap.sh` 现在会识别这种情况并重装，但一开始就别踩。
+
+下单（`--onstart` 第一次别挂，否则 smoke 一过就自动跑满 3 小时）：
 
 ```bash
 python tools/vast.py create <offer_id> \
-  --image <你的镜像> \
-  --disk 200 \
-  --onstart onstart.sh
+  --image vastai/base-image \
+  --disk 300
 ```
 
 ---

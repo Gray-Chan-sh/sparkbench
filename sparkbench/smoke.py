@@ -1,6 +1,7 @@
 """Smoke gate: run first, 3 minutes. If this fails, do not spend the rest of the booking."""
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 
@@ -40,6 +41,21 @@ def run(profile_name: str) -> int:
     cc = info.get("cc")
     want_cc = expect.get("cc")
     rows.append(_row("compute capability", OK if cc == want_cc else FAIL, f"{cc} (expected {want_cc})"))
+
+    # SASS vs PTX. A build without sm_121 still "works": the driver JIT-compiles
+    # from PTX on first call, so the matmul below passes and every number is wrong.
+    archs = info.get("torch_archs") or []
+    want_sm = "sm_" + str(cc).replace(".", "") if cc else "sm_121"
+    blackwell = [a for a in archs if a in ("sm_100", "sm_103", "sm_110", "sm_120", "sm_121", "sm_130")]
+    allow_jit = os.environ.get("SPARKBENCH_ALLOW_JIT") == "1"
+    if want_sm in archs:
+        rows.append(_row("kernel arch", OK, f"{want_sm} in {archs}"))
+    elif blackwell:
+        rows.append(_row("kernel arch", WARN if allow_jit else FAIL,
+                         f"{want_sm} missing, only {blackwell}: PTX JIT, timings not comparable"))
+    else:
+        rows.append(_row("kernel arch", WARN if allow_jit else FAIL,
+                         f"{want_sm} missing from {archs}: every kernel JITs"))
 
     vram = info.get("vram_gib") or 0
     want_vram = expect.get("vram_gib")

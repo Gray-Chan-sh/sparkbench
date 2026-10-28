@@ -24,15 +24,32 @@ fi
 pip_install() { python3 -m pip install --no-cache-dir ${PIP_FLAGS} "$@"; }
 
 # ---------------------------------------------------------------- torch
-torch_ok() {
+# Two separate questions, and they are not the same question:
+#   can it see the GPU?  -- a cu124 build says yes on a Blackwell card
+#   does it have sm_121 SASS? -- without it every kernel JITs from PTX at first
+#   call. The matmul still succeeds, the timings are fiction.
+# The PyTorch (Vast) template on this offer ships exactly that: working, wrong.
+torch_state() {
   python3 - <<'PY'
 import sys
 try:
     import torch
 except Exception:
-    sys.exit(1)
-sys.exit(0 if torch.cuda.is_available() else 1)
+    print("none"); sys.exit(0)
+if not torch.cuda.is_available():
+    print("no-cuda"); sys.exit(0)
+p = torch.cuda.get_device_properties(0)
+want = f"sm_{p.major}{p.minor}"
+archs = torch.cuda.get_arch_list()
+print(("native" if want in archs else "no-sass") + f" want={want} archs={','.join(archs) or '-'}")
 PY
+}
+
+torch_native() {
+  case "$(torch_state)" in
+    native*) return 0 ;;
+    *)       return 1 ;;
+  esac
 }
 
 install_torch() {
@@ -48,22 +65,42 @@ install_torch() {
       pypi) pip_install torch ;;
       *)    pip_install --index-url "https://download.pytorch.org/whl/${c}" torch ;;
     esac
-    if torch_ok; then
-      echo "[bootstrap] torch: ok via ${c}"
+    if torch_native; then
+      echo "[bootstrap] torch: ok via ${c} ($(torch_state))"
       return 0
     fi
-    echo "[bootstrap] torch: ${c} installed but cannot see the GPU, trying next"
+    echo "[bootstrap] torch: ${c} -> $(torch_state)"
   done
   return 1
 }
 
-if torch_ok; then
-  echo "[bootstrap] torch already works with the GPU"
-elif ! install_torch; then
-  echo "[bootstrap] FATAL: no torch build here can see the GPU." >&2
-  echo "[bootstrap]        stop the instance; do not pay for a broken box." >&2
-  exit 1
-fi
+state="$(torch_state)"
+case "${state}" in
+  native*)
+    echo "[bootstrap] torch already has native kernels: ${state}"
+    ;;
+  no-sass*)
+    if [ "${SPARKBENCH_ALLOW_JIT:-0}" = "1" ]; then
+      echo "[bootstrap] WARNING: ${state} -> PTX JIT; continuing because SPARKBENCH_ALLOW_JIT=1"
+      echo "[bootstrap] WARNING: these numbers are not comparable to a native build."
+    else
+      echo "[bootstrap] torch sees the GPU but has no matching SASS: ${state}"
+      echo "[bootstrap] every kernel would JIT-compile; reinstalling"
+      install_torch || {
+        echo "[bootstrap] FATAL: no torch build here has native kernels for this GPU." >&2
+        echo "[bootstrap]        set SPARKBENCH_ALLOW_JIT=1 to measure anyway (numbers will not be comparable)." >&2
+        exit 1
+      }
+    fi
+    ;;
+  *)
+    install_torch || {
+      echo "[bootstrap] FATAL: no torch build here can see the GPU." >&2
+      echo "[bootstrap]        stop the instance; do not pay for a broken box." >&2
+      exit 1
+    }
+    ;;
+esac
 
 pip_install -r "$(dirname "$0")/requirements.txt" || {
   echo "[bootstrap] WARNING: some requirements failed to install" >&2

@@ -210,11 +210,18 @@ def env_info() -> dict:
     }
     if torch.cuda.is_available():
         p = torch.cuda.get_device_properties(0)
+        try:
+            archs = torch.cuda.get_arch_list()
+        except Exception:  # noqa: BLE001
+            archs = []
         info.update(
             device=p.name,
             cc=f"{p.major}.{p.minor}",
             sm_count=p.multi_processor_count,
             vram_gib=round(p.total_memory / 2**30, 1),
+            # SASS present in this build. If sm_121 is missing, every kernel is
+            # JIT-compiled from PTX at first call: it runs, and every timing is wrong.
+            torch_archs=archs,
         )
     else:
         info["device"] = None
