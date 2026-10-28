@@ -1,6 +1,6 @@
 profile ?= gb10
 
-.PHONY: smoke a b c d e bench report offers watch clean
+.PHONY: smoke a b c d e bench report audit pull push shots clean
 
 smoke:
 	python -m sparkbench smoke --profile $(profile)
@@ -13,6 +13,21 @@ bench:
 
 report:
 	python tools/report.py --profile $(profile)
+
+audit:
+	python -m sparkbench audit
+
+shots:
+	python -m sparkbench shots
+
+pull:
+	python tools/pull.py --host $(host) --port $(port) --interval 600
+
+push:
+	python tools/push.py --git --webhook
+
+run:
+	bash run.sh
 
 offers:
 	python tools/vast.py offers --gpu GB10

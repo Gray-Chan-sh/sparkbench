@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -10,7 +11,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def load(path: Path) -> list[dict]:
     if not path.exists():
-        raise SystemExit(f"no results at {path}")
+        print(f"no results at {path}")
+        return []
     rows = []
     for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
         try:
@@ -38,16 +40,13 @@ def bar(pct):
     return "#" * max(0, min(20, filled)) + "." * (20 - max(0, min(20, filled))) + f" {pct * 100:5.1f}%"
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--profile", default="gb10")
-    ap.add_argument("--results", default=None)
-    args = ap.parse_args()
-
+def _render(args) -> int:
     prof = json.loads((ROOT / "profiles" / f"{args.profile}.json").read_text(encoding="utf-8"))
     expect = prof.get("expect", {})
     path = Path(args.results) if args.results else ROOT / "results" / "results.jsonl"
     rows = load(path)
+    if not rows:
+        return 1
 
     env = pick(rows, "env", "start") or {}
     info = env.get("env", {})
@@ -133,6 +132,84 @@ def main() -> int:
         bits.append(f"长跑衰减 {sus['decay_pct']}%")
     print("- " + "; ".join(bits))
     return 0
+
+
+def _summary(rows: list[dict], expect: dict, info: dict) -> dict:
+    def last(test, key=None):
+        hits = [r for r in rows if r["test"] == test and (key is None or r["key"].endswith(key))]
+        return hits[-1] if hits else None
+
+    best = {}
+    for r in rows:
+        if r["test"] == "a_compute" and r.get("dtype") and "tflops" in r:
+            best[r["dtype"]] = max(best.get(r["dtype"], 0), r["tflops"])
+
+    bw = last("b_bandwidth", ":copy")
+    cap = last("c_capacity", ":alloc")
+    sus = last("e_sustained")
+    bf16 = best.get("bf16")
+    exp = expect.get("bf16_tflops")
+
+    return {
+        "env": info,
+        "bf16_tflops": bf16,
+        "bf16_pct": round(bf16 / exp * 100, 1) if bf16 and exp else None,
+        "fp8_tflops": best.get("fp8"),
+        "bandwidth_gbs": (bw or {}).get("gbs"),
+        "vram_peak_gib": (cap or {}).get("allocated_gib"),
+        "vram_usable_gib": (cap or {}).get("declared_vram_gib"),
+        "swap_cliff_gib": (cap or {}).get("cliff_gib"),
+        "soak_decay_pct": (sus or {}).get("decay_pct"),
+        "counts": {t: sum(1 for r in rows if r["test"] == t) for t in
+                   ("a_compute", "b_bandwidth", "c_capacity", "d_video", "e_sustained")},
+    }
+
+
+def _publish(args, text: str, rows: list[dict], expect: dict, info: dict) -> None:
+    import csv
+
+    out = Path(os.environ.get("SPARKBENCH_OUT", ROOT / "results"))
+    pub = out / "publish"
+    pub.mkdir(parents=True, exist_ok=True)
+    (pub / "report.md").write_text(text, encoding="utf-8")
+
+    summary = _summary(rows, expect, info)
+    (pub / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2),
+                                      encoding="utf-8")
+
+    keys = ["key", "test", "ts", "tflops", "gbs", "allocated_gib", "peak_gib",
+            "seconds", "decay_pct", "frames", "status"]
+    extra = ["dtype", "size", "label", "model", "median_ms", "p95_ms", "n"]
+    with (pub / "metrics.csv").open("w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(keys + extra + ["error"])
+        for r in rows:
+            w.writerow([r.get(k) for k in keys] + [r.get(k) for k in extra] + [r.get("error", "")])
+    print(f"\nwritten -> {pub}")
+
+
+def main(argv=None) -> int:
+    import contextlib
+    import io
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--profile", default="gb10")
+    ap.add_argument("--results", default=None)
+    args = ap.parse_args(argv)
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = _render(args)
+
+    text = buf.getvalue()
+    print(text, end="")
+
+    prof = json.loads((ROOT / "profiles" / f"{args.profile}.json").read_text(encoding="utf-8"))
+    path = Path(args.results) if args.results else ROOT / "results" / "results.jsonl"
+    rows = load(path)
+    env = pick(rows, "env", "start") or {}
+    _publish(args, text, rows, prof.get("expect", {}), env.get("env", {}))
+    return rc
 
 
 if __name__ == "__main__":

@@ -82,6 +82,118 @@ def memory_facts(vram_gib: float | None = None) -> dict:
     }
 
 
+def _git_info() -> dict:
+    """Which code produced these numbers. List form: the repo path may contain spaces."""
+    def run(*args):
+        try:
+            p = subprocess.run(["git", "-C", str(ROOT), *args],
+                               capture_output=True, text=True, timeout=10)
+            return p.returncode, p.stdout.strip()
+        except Exception:  # noqa: BLE001
+            return 1, ""
+
+    rc, commit = run("rev-parse", "--short", "HEAD")
+    if rc != 0 or not commit:
+        return {"commit": None, "dirty": None}
+    rc2, dirty = run("status", "--porcelain", "--untracked-files=no")
+    return {"commit": commit, "dirty": bool(dirty) if rc2 == 0 else None}
+
+
+def write_lockfile() -> Path | None:
+    """One version string does not pin transitive deps."""
+    try:
+        out = subprocess.run([sys.executable, "-m", "pip", "freeze"],
+                             capture_output=True, text=True, timeout=120).stdout
+    except Exception:  # noqa: BLE001
+        return None
+    if not out.strip():
+        return None
+    p = OUT / "requirements.lock"
+    p.write_text(out, encoding="utf-8")
+    return p
+
+
+def write_manifest(extra: dict | None = None) -> Path:
+    """Per-file sha256 so "complete" is verifiable rather than claimed."""
+    import hashlib
+
+    files = []
+    for p in sorted(OUT.rglob("*")):
+        if not p.is_file() or p.name == "manifest.json":
+            continue
+        rel = str(p.relative_to(OUT))
+        size = p.stat().st_size
+        if size > 32 * 2**20:
+            files.append({"path": rel, "size": size, "sha256": None, "unhashed": "large"})
+            continue
+        files.append({"path": rel, "size": size,
+                      "sha256": hashlib.sha256(p.read_bytes()).hexdigest()})
+
+    doc = {
+        "generated": now(),
+        "version": _version(),
+        "git": _git_info(),
+        "revisions": dict(_REVS),
+        "count": len(files),
+        "bytes": sum(f["size"] for f in files),
+        "files": files,
+        **(extra or {}),
+    }
+    path = OUT / "manifest.json"
+    path.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+_REVS: dict[str, str | None] = {}
+
+
+def _cache_revision(repo_id: str) -> str | None:
+    base = Path(os.environ.get("HF_HOME", str(Path.home() / ".cache" / "huggingface"))) / "hub"
+    d = base / ("models--" + repo_id.replace("/", "--"))
+    ref = d / "refs" / "main"
+    if ref.exists():
+        return ref.read_text(encoding="utf-8").strip()
+    snaps = d / "snapshots"
+    if snaps.exists():
+        found = sorted(p.name for p in snaps.iterdir() if p.is_dir())
+        if found:
+            return found[-1]
+    return None
+
+
+def model_revision(repo_id: str) -> str | None:
+    """Pin weights: HF repos are updated in place under the same id."""
+    if repo_id in _REVS:
+        return _REVS[repo_id]
+    sha = None
+    revfile = OUT / "revisions.json"
+    if revfile.exists():
+        try:
+            sha = json.loads(revfile.read_text(encoding="utf-8")).get(repo_id)
+        except Exception:  # noqa: BLE001
+            sha = None
+    if not sha:
+        try:
+            from huggingface_hub import model_info
+
+            sha = model_info(repo_id, timeout=20).sha
+        except Exception:  # noqa: BLE001
+            sha = None
+    if not sha:
+        sha = _cache_revision(repo_id)
+    _REVS[repo_id] = sha
+    return sha
+
+
+def _version() -> str:
+    try:
+        from . import __version__
+
+        return __version__
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
 def env_info() -> dict:
     import torch
 
@@ -92,6 +204,8 @@ def env_info() -> dict:
         "torch_cuda": torch.version.cuda,
         "hostname": platform.node(),
         "kernel": platform.release(),
+        "version": _version(),
+        "git": _git_info(),
         "driver": sh("nvidia-smi --query-gpu=driver_version --format=csv,noheader"),
     }
     if torch.cuda.is_available():

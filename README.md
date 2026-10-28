@@ -113,6 +113,55 @@ python tools/report.py --profile gb10        # 出结论
 
 任何一段超时就 `Ctrl-C` 跳过——**已完成的项不会重跑**（除非加 `--no-resume`）。
 
+一键版（自动进 tmux、smoke 门失败即停、跑完出报告 + 审计 + 推送）：
+
+```bash
+bash run.sh                    # 全流程
+bash run.sh --phases a,b       # 只跑两段
+```
+
+---
+
+## 可还原性（和 canguoai 项目同一套标准）
+
+```bash
+python -m sparkbench audit                                  # 审计当前 results/
+python -m sparkbench audit --results sb-results/latest/results   # 审计拉回本地的快照
+```
+
+三档判定：`reproducible` / `replay only` / `cannot replay`，写进 `audit.json`。
+
+运行时自动记录：代码 commit（`env.json` → `git.commit`）、依赖锁（`requirements.lock`）、
+权重版本（`revisions.json` + 每条的 `model_revision`）、逐文件哈希（`manifest.json`）、
+以及容器/统一内存事实（`env.json` → `memory`）。
+
+**容器场景下最值钱的一条检查**在 smoke 里：如果 cgroup 内存上限低于统一内存池，
+它会直接判 FAIL——否则你会在“128GB 的机器”上跑三小时，实际只用到了 64GB。
+
+---
+
+## 播客素材
+
+```bash
+python -m sparkbench shots                     # 分镜脚本（8 个镜头，按 A–E 排）
+python -m sparkbench.capture run 03-compute -- python -m sparkbench a --profile gb10
+```
+
+终端录制走 pty（不是管道），所以 `tqdm`、颜色、`isatty()` 行为都和在真终端里一致。
+产物在 `results/captures/*.cast`，asciinema v2 格式，可直接播放或 `agg` 转 GIF。
+有 `DISPLAY` 时才启用截图/桌面录屏，没有就如实报 unavailable。
+
+---
+
+## 把结果拉回本地
+
+```bash
+python tools/pull.py --host <ip> --port <port> --key ~/.ssh/id_ed25519 --interval 600
+```
+
+只读 `tar`，不碰正在写的文件；每 10 分钟几 MB。落地 `<dest>/latest/` + `history/*.tgz`。
+`--with-videos` 才会带上桌面录屏这类大文件（mtime 保护，解包后删档）。
+
 ---
 
 ## 6. 长视频那一段怎么配
