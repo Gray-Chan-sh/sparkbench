@@ -15,7 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     SPARKBENCH_OUT=/workspace/results
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg git curl ca-certificates \
+        ffmpeg git curl ca-certificates tmux \
     && rm -rf /var/lib/apt/lists/*
 
 # CUDA base images ship no python; NGC images ship python + torch.

@@ -6,7 +6,8 @@
 #   bash run.sh --phases a,b     # partial
 #   bash run.sh --skip-smoke     # only if you already ran the gate by hand
 set -uo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
+SELF="$PWD/$(basename "$0")"
 
 PHASES=""
 SKIP_SMOKE=0
@@ -19,14 +20,22 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+# results/ must exist before tee runs inside the detached session, not after.
+mkdir -p results
+
 if [ -z "${TMUX:-}" ] && [ "${SB_NO_TMUX:-0}" != "1" ]; then
-  tmux kill-session -t sparkbench 2>/dev/null || true
-  tmux new-session -d -s sparkbench "SB_NO_TMUX=1 bash '$0' $* 2>&1 | tee -a results/run.log"
-  echo "started in tmux:  tmux attach -t sparkbench   (or tail -f results/run.log)"
+  if command -v tmux >/dev/null; then
+    tmux kill-session -t sparkbench 2>/dev/null || true
+    quoted=$(printf ' %q' "$@")
+    tmux new-session -d -s sparkbench "SB_NO_TMUX=1 bash '$SELF'$quoted 2>&1 | tee -a results/run.log"
+    echo "started in tmux:  tmux attach -t sparkbench   (or tail -f results/run.log)"
+  else
+    # No tmux (fresh container): nohup still survives the SSH drop.
+    SB_NO_TMUX=1 nohup bash "$SELF" "$@" >> results/run.log 2>&1 &
+    echo "no tmux; started with nohup (pid $!) -> tail -f results/run.log"
+  fi
   exit 0
 fi
-
-mkdir -p results
 echo "=== sparkbench start $(date -u) ===" | tee -a results/run.log
 
 bash bootstrap.sh 2>&1 | tee -a results/run.log
