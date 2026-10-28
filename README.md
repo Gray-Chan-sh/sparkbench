@@ -76,19 +76,22 @@ python tools/vast.py create <offer_id> \
 
 ## 4. 构建 arm64 镜像（GitHub Actions，零本地依赖）
 
-本机没有 Docker 也能出镜像。把 `sparkbench/` 推成一个独立仓库，Actions 会跑 `.github/workflows/image.yml`：
+本机没有 Docker 也能出镜像。`sparkbench/` 已推到 `github.com/Gray-Chan-sh/sparkbench`，推 `v*` tag 即触发 `.github/workflows/image.yml`。
 
+**已构建通过**：`ghcr.io/gray-chan-sh/sparkbench:latest`（linux/arm64，匿名可拉）。
+
+本机拉取验证：
+
+```bash
+docker pull ghcr.io/gray-chan-sh/sparkbench:latest
 ```
-Actions -> image -> Run workflow
-```
 
-产物：`ghcr.io/<owner>/<repo>:latest`（arm64，已验证 Blackwell 架构）。
-
-- **不配任何 secret 也能跑**：走公开基座 `nvidia/cuda:13.0.0-devel-ubuntu24.04` + pip 装 cu130 torch。
-- **配了 `NGC_API_KEY`**：自动换成 `nvcr.io/nvidia/pytorch:25.09-py3`，sm_121 kernel 更稳。
+- **不配任何 secret 也能跑**：走公开基座 `nvidia/cuda:13.0.0-devel-ubuntu24.04` + pip 装 cu130 torch（当前 `latest` 就是这么来的）。
+- **配了 `NGC_API_KEY`**（repo → Settings → Secrets → Actions）：自动换成 `nvcr.io/nvidia/pytorch:25.09-py3`，sm_121 kernel 更稳。
 - 构建期有硬闸门：`torch.cuda.get_arch_list()` 里没有 `sm_100/103/110/120/121` 就直接失败，避免推一个只能 JIT 的废镜像。
+- 触发方式：`git tag v0.1.x && git push origin v0.1.x`（推 main 不会触发，这是 `push.tags` 过滤器的预期行为）。
 
-GHCR 包默认私有，第一次用完去 Package settings 里改成 public，否则 vast 主机拉不动。
+> 注意：GitHub 不允许在 step 的 `if` 里引用 `secrets`（会直接判定 workflow 非法，0 个 job）。本 workflow 里用 shell 判断代替。
 
 ---
 

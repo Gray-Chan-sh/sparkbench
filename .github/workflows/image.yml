@@ -88,7 +88,14 @@ jobs:
       - name: Verify image boots as arm64
         run: |
           docker run --rm --platform linux/arm64 "${{ steps.ref.outputs.name }}:${{ github.sha }}" \
-            sh -c 'uname -m && python3 -c "import torch; print(\"torch\", torch.__version__, \"archs\", torch.cuda.get_arch_list())"'
+            sh -c 'uname -m && python3 -c "import torch; print(\"torch\", torch.__version__, \"archs\", torch.cuda.get_arch_list())"' \
+            | tee /tmp/verify.txt
+          {
+            echo "### image verification"
+            echo '```'
+            cat /tmp/verify.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Summary
         run: |
