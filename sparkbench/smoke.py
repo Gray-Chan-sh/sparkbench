@@ -50,6 +50,33 @@ def run(profile_name: str) -> int:
     else:
         rows.append(_row("vram", OK, f"{vram} GiB"))
 
+    # --- what the process can actually reach ------------------------------------
+    # On a unified-memory box a container memory cap silently truncates the GPU pool,
+    # and the resulting CUDA OOM reads like "not enough VRAM". Catch it before the run.
+    mem = info.get("memory") or {}
+    rows.append(_row("runtime", OK if not mem.get("container") else WARN,
+                     "container" if mem.get("container") else "bare metal"))
+    if mem.get("unified") is not None:
+        if mem.get("unified"):
+            rows.append(_row("unified memory", OK,
+                             f"yes (cpu {mem.get('mem_total_gib')} GiB == gpu {vram} GiB)"))
+        else:
+            rows.append(_row("unified memory", OK,
+                             f"no (cpu {mem.get('mem_total_gib')} GiB, gpu {vram} GiB)"))
+
+    cap = mem.get("cgroup_cap_gib")
+    if mem.get("unified") and cap and vram and cap < vram * 0.9:
+        rows.append(_row("cgroup cap vs pool", FAIL,
+                         f"cap {cap} GiB < pool {vram} GiB -> you cannot use the full card"))
+    else:
+        rows.append(_row("cgroup cap vs pool", OK,
+                         f"cap {cap} GiB" if cap else "no cap"))
+
+    avail = mem.get("mem_available_gib")
+    if avail is not None and vram:
+        rows.append(_row("free memory at start", OK if avail > vram * 0.5 else WARN,
+                         f"{avail} GiB available"))
+
     # Real matmul, not just an import: catches missing sm_XX kernels.
     try:
         a = torch.randn(2048, 2048, device="cuda", dtype=torch.bfloat16)

@@ -31,6 +31,57 @@ def load_profile(name: str) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _cgroup_limit_bytes() -> int | None:
+    """Container memory cap. On GB10 this caps the *unified* pool, not just RAM:
+    a 64 GiB cap makes a 128 GiB machine behave like a 64 GiB machine, and the
+    failure surfaces as a CUDA OOM that looks like a VRAM problem."""
+    for p in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            v = Path(p).read_text(encoding="utf-8").strip()
+        except Exception:  # noqa: BLE001
+            continue
+        if v == "max":
+            return None
+        if v.isdigit():
+            n = int(v)
+            return None if n > 2**60 else n   # cgroup v1 "unlimited" sentinel
+    return None
+
+
+def _meminfo() -> dict:
+    try:
+        out = {}
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            k, _, v = line.partition(":")
+            out[k.strip()] = int(v.strip().split()[0]) * 1024
+        return out
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def memory_facts(vram_gib: float | None = None) -> dict:
+    """What this process can actually reach, versus what the GPU claims."""
+    gib = lambda b: round(b / 2**30, 1) if b else None  # noqa: E731
+    mem = _meminfo()
+    total, avail = mem.get("MemTotal"), mem.get("MemAvailable")
+    cap = _cgroup_limit_bytes()
+    container = Path("/.dockerenv").exists() or "docker" in sh("head -c 4000 /proc/1/cgroup 2>/dev/null")
+    vram_b = vram_gib * 2**30 if vram_gib else None
+    unified = bool(vram_gib and total and abs(vram_gib - total / 2**30) / (total / 2**30) < 0.15)
+    # The "effective pool" only means something when CPU and GPU share one pool.
+    # On a discrete card the cgroup cap limits host RAM, not VRAM.
+    candidates = [x for x in (total, cap) if x] + ([vram_b] if unified and vram_b else [])
+    return {
+        "container": bool(container),
+        "mem_total_gib": gib(total),
+        "mem_available_gib": gib(avail),
+        "cgroup_cap_gib": gib(cap),
+        "vram_gib": vram_gib,
+        "effective_pool_gib": gib(min(candidates)) if unified and candidates else None,
+        "unified": unified,
+    }
+
+
 def env_info() -> dict:
     import torch
 
@@ -53,6 +104,7 @@ def env_info() -> dict:
         )
     else:
         info["device"] = None
+    info["memory"] = memory_facts(info.get("vram_gib"))
     return info
 
 
